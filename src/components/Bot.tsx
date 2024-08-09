@@ -63,15 +63,15 @@ export type IAgentReasoning = {
 export type IAction = {
   id?: string;
   elements?: Array<{
-      type: string;
-      label: string;
+    type: string;
+    label: string;
   }>;
   mapping?: {
-      approve: string;
-      reject: string;
-      toolCalls: any[];
+    approve: string;
+    reject: string;
+    toolCalls: any[];
   };
-}
+};
 
 export type FileUpload = Omit<FilePreview, 'preview'>;
 
@@ -111,6 +111,8 @@ export type BotProps = {
   isFullPage?: boolean;
   footer?: FooterTheme;
   observersConfig?: observersConfigType;
+  starterPrompts?: string[];
+  starterPromptFontSize?: number;
 };
 
 export type LeadsConfig = {
@@ -299,7 +301,7 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
     });
     setLocalStorageChatflow(props.chatflowid, chatId(), { chatHistory: messages });
   };
-  
+
   // Define the audioRef
   let audioRef: HTMLAudioElement | undefined;
   // CDN link for default receive sound
@@ -315,55 +317,36 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
     }
   };
 
+  let hasSoundPlayed = false;
+  // TODO: this has the bug where first message is not showing: https://github.com/FlowiseAI/FlowiseChatEmbed/issues/158
+  // The solution is to use SSE
   const updateLastMessage = (
     text: string,
-    messageId: string,
-    sourceDocuments: any = null,
-    fileAnnotations: any = null,
+    sourceDocuments: any,
+    fileAnnotations: any,
     agentReasoning: IAgentReasoning[] = [],
     action: IAction,
     resultText: string,
   ) => {
     setMessages((data) => {
-      let uiUpdated = false;
-
       const updated = data.map((item, i) => {
         if (i === data.length - 1) {
-          const previousText = item.message || '';
-          let newText = previousText + text;
-          // Set newText to resultText only if previousText is empty and resultText exists
-          if (!previousText && resultText) {
-            newText = resultText;
+          if (resultText && !hasSoundPlayed) {
+            playReceiveSound();
+            hasSoundPlayed = true;
           }
-          // Check if newText now matches resultText to track UI update
-          if (newText === resultText) {
-            uiUpdated = true;
-          }
-          return { ...item, message: newText, messageId, sourceDocuments, fileAnnotations, agentReasoning };
+          return { ...item, message: item.message + text, sourceDocuments, fileAnnotations, agentReasoning, action };
         }
         return item;
       });
-
-      // Add apiMessage if resultText exists and ui not updated
-      if (resultText && !uiUpdated) {
-        updated.push({
-          message: resultText,
-          type: 'apiMessage',
-          messageId,
-          sourceDocuments,
-          fileAnnotations,
-          agentReasoning,
-          action,
-        });
-      }
-
-      if (resultText) {
-        playReceiveSound();
-      }
-
       addChatMessage(updated);
       return [...updated];
     });
+
+    // Set hasSoundPlayed to false if resultText exists
+    if (resultText) {
+      hasSoundPlayed = false;
+    }
   };
 
   const updateLastMessageSourceDocuments = (sourceDocuments: any) => {
@@ -403,7 +386,7 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
       addChatMessage(updated);
       return [...updated];
     });
-}
+  };
 
   const clearPreviews = () => {
     // Revoke the data uris to avoid memory leaks
@@ -469,7 +452,7 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
 
     if (leadEmail()) body.leadEmail = leadEmail();
 
-    if (action) body.action = action
+    if (action) body.action = action;
 
     if (isChatFlowAvailableToStream()) {
       body.socketIOClientId = socketIOClientId();
@@ -523,9 +506,9 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
         else if (data.json) text = JSON.stringify(data.json, null, 2);
         else text = JSON.stringify(data, null, 2);
 
-        updateLastMessage(text, data?.chatMessageId, data?.sourceDocuments, data?.fileAnnotations, data?.agentReasoning, data?.action, data.text);
+        updateLastMessage(text, data?.sourceDocuments, data?.fileAnnotations, data?.agentReasoning, data?.action, data.text);
       } else {
-        updateLastMessage('', data?.chatMessageId, data?.sourceDocuments, data?.fileAnnotations, data?.agentReasoning, data?.action, data.text);
+        updateLastMessage('', data?.sourceDocuments, data?.fileAnnotations, data?.agentReasoning, data?.action, data.text);
       }
       setLoading(false);
       setUserInput('');
@@ -548,7 +531,7 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
   };
 
   const handleActionClick = async (label: string, action: IAction | undefined | null) => {
-    setUserInput(label)
+    setUserInput(label);
     setMessages((data) => {
       const updated = data.map((item, i) => {
         if (i === data.length - 1) {
@@ -559,7 +542,7 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
       addChatMessage(updated);
       return [...updated];
     });
-    handleSubmit(label, action)
+    handleSubmit(label, action);
   };
 
   const clearChat = () => {
@@ -583,6 +566,14 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
       console.error(`error: ${errorData}`);
     }
   };
+
+  createEffect(() => {
+    if (props.starterPrompts && props.starterPrompts.length > 0) {
+      const prompts = Object.values(props.starterPrompts).map((prompt) => prompt);
+
+      return setStarterPrompts(prompts.filter((prompt) => prompt !== ''));
+    }
+  });
 
   // Auto scroll chat to bottom
   createEffect(() => {
@@ -648,7 +639,7 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
 
     if (result.data) {
       const chatbotConfig = result.data;
-      if (chatbotConfig.starterPrompts) {
+      if ((!props.starterPrompts || props.starterPrompts?.length === 0) && chatbotConfig.starterPrompts) {
         const prompts: string[] = [];
         Object.getOwnPropertyNames(chatbotConfig.starterPrompts).forEach((key) => {
           prompts.push(chatbotConfig.starterPrompts[key].prompt);
@@ -921,12 +912,16 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
 
   const getInputDisabled = (): boolean => {
     const messagesArray = messages();
-    const disabled = loading() || !props.chatflowid || (leadsConfig()?.status && !isLeadSaved()) || (messagesArray[messagesArray.length - 1].action && Object.keys(messagesArray[messagesArray.length - 1].action as any).length > 0)
+    const disabled =
+      loading() ||
+      !props.chatflowid ||
+      (leadsConfig()?.status && !isLeadSaved()) ||
+      (messagesArray[messagesArray.length - 1].action && Object.keys(messagesArray[messagesArray.length - 1].action as any).length > 0);
     if (disabled) {
       return true;
     }
     return false;
-  }
+  };
 
   createEffect(
     // listen for changes in previews
@@ -1103,7 +1098,15 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
           <Show when={messages().length === 1}>
             <Show when={starterPrompts().length > 0}>
               <div class="w-full flex flex-row flex-wrap px-5 py-[10px] gap-2">
-                <For each={[...starterPrompts()]}>{(key) => <StarterPromptBubble prompt={key} onPromptClick={() => promptClick(key)} />}</For>
+                <For each={[...starterPrompts()]}>
+                  {(key) => (
+                    <StarterPromptBubble
+                      prompt={key}
+                      onPromptClick={() => promptClick(key)}
+                      starterPromptFontSize={botProps.starterPromptFontSize} // Pass it here as a number
+                    />
+                  )}
+                </For>
               </div>
             </Show>
           </Show>
