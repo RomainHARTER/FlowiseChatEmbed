@@ -14,10 +14,10 @@ import { BotBubble } from './bubbles/BotBubble';
 import { LoadingBubble } from './bubbles/LoadingBubble';
 import { SourceBubble } from './bubbles/SourceBubble';
 import { StarterPromptBubble } from './bubbles/StarterPromptBubble';
-import { BotMessageTheme, FooterTheme, TextInputTheme, UserMessageTheme, FeedbackTheme } from '@/features/bubble/types';
+import { BotMessageTheme, FooterTheme, TextInputTheme, UserMessageTheme, FeedbackTheme, DisclaimerPopUpTheme } from '@/features/bubble/types';
 import { Badge } from './Badge';
 import socketIOClient from 'socket.io-client';
-import { Popup } from '@/features/popup';
+import { Popup, DisclaimerPopup } from '@/features/popup';
 import { Avatar } from '@/components/avatars/Avatar';
 import { DeleteButton, SendButton } from '@/components/buttons/SendButton';
 import { FilePreview } from '@/components/inputs/textInput/components/FilePreview';
@@ -25,7 +25,7 @@ import { CircleDotIcon, TrashIcon } from './icons';
 import { CancelButton } from './buttons/CancelButton';
 import { cancelAudioRecording, startAudioRecording, stopAudioRecording } from '@/utils/audioRecording';
 import { LeadCaptureBubble } from '@/components/bubbles/LeadCaptureBubble';
-import { removeLocalStorageChatHistory, getLocalStorageChatflow, setLocalStorageChatflow } from '@/utils';
+import { removeLocalStorageChatHistory, getLocalStorageChatflow, setLocalStorageChatflow, setCookie, getCookie } from '@/utils';
 
 export type FileEvent<T = EventTarget> = {
   target: T;
@@ -122,10 +122,12 @@ export type BotProps = {
   fontSize?: number;
   isFullPage?: boolean;
   footer?: FooterTheme;
+  sourceDocsTitle?: string;
   observersConfig?: observersConfigType;
   starterPrompts?: string[];
   starterPromptFontSize?: number;
   clearChatOnReload?: boolean;
+  disclaimer?: DisclaimerPopUpTheme;
 };
 
 export type LeadsConfig = {
@@ -226,6 +228,9 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
   let bottomSpacer: HTMLDivElement | undefined;
   let botContainer: HTMLDivElement | undefined;
 
+  // Extract sourceDocsTitle directly from props
+  const sourceDocsTitle = props.sourceDocsTitle;
+
   const [userInput, setUserInput] = createSignal('');
   const [loading, setLoading] = createSignal(false);
   const [sourcePopupOpen, setSourcePopupOpen] = createSignal(false);
@@ -251,6 +256,7 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
   const [leadsConfig, setLeadsConfig] = createSignal<LeadsConfig>();
   const [isLeadSaved, setIsLeadSaved] = createSignal(false);
   const [leadEmail, setLeadEmail] = createSignal('');
+  const [disclaimerPopupOpen, setDisclaimerPopupOpen] = createSignal(false);
 
   // drag & drop file input
   // TODO: fix this type
@@ -422,13 +428,17 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
     scrollToBottom();
   };
 
+  const handleDisclaimerAccept = () => {
+    setDisclaimerPopupOpen(false); // Close the disclaimer popup
+    setCookie('chatbotDisclaimer', 'true', 365); // Disclaimer accepted
+  };
+
   const promptClick = (prompt: string) => {
     handleSubmit(prompt);
   };
 
   // Handle form submission
   const handleSubmit = async (value: string, action?: IAction | undefined | null) => {
-    setUserInput(value);
     if (value.trim() === '') {
       const containsFile = previews().filter((item) => !item.mime.startsWith('image') && item.type !== 'audio').length > 0;
       if (!previews().length || (previews().length && containsFile)) {
@@ -643,6 +653,16 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
 
   // eslint-disable-next-line solid/reactivity
   createEffect(async () => {
+    if (props.disclaimer) {
+      if (getCookie('chatbotDisclaimer') == 'true') {
+        setDisclaimerPopupOpen(false);
+      } else {
+        setDisclaimerPopupOpen(true);
+      }
+    } else {
+      setDisclaimerPopupOpen(false);
+    }
+
     const chatMessage = getLocalStorageChatflow(props.chatflowid);
     if (chatMessage && Object.keys(chatMessage).length) {
       if (chatMessage.chatId) setChatId(chatMessage.chatId);
@@ -1190,27 +1210,33 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
                     {message.type === 'userMessage' && loading() && index() === messages().length - 1 && <LoadingBubble />}
                     {message.type === 'apiMessage' && message.message === '' && loading() && index() === messages().length - 1 && <LoadingBubble />}
                     {message.sourceDocuments && message.sourceDocuments.length && (
-                      <div style={{ display: 'flex', 'flex-direction': 'row', width: '100%', 'flex-wrap': 'wrap' }}>
-                        <For each={[...removeDuplicateURL(message)]}>
-                          {(src) => {
-                            const URL = isValidURL(src.metadata.source);
-                            return (
-                              <SourceBubble
-                                pageContent={URL ? URL.pathname : src.pageContent}
-                                metadata={src.metadata}
-                                onSourceClick={() => {
-                                  if (URL) {
-                                    window.open(src.metadata.source, '_blank');
-                                  } else {
-                                    setSourcePopupSrc(src);
-                                    setSourcePopupOpen(true);
-                                  }
-                                }}
-                              />
-                            );
-                          }}
-                        </For>
-                      </div>
+                      <>
+                        <Show when={sourceDocsTitle}>
+                          <span class="px-2 py-[10px] font-semibold">{sourceDocsTitle}</span>
+                        </Show>
+
+                        <div style={{ display: 'flex', 'flex-direction': 'row', 'flex-wrap': 'wrap', width: '100%' }}>
+                          <For each={[...removeDuplicateURL(message)]}>
+                            {(src) => {
+                              const URL = isValidURL(src.metadata.source);
+                              return (
+                                <SourceBubble
+                                  pageContent={URL ? URL.pathname : src.pageContent}
+                                  metadata={src.metadata}
+                                  onSourceClick={() => {
+                                    if (URL) {
+                                      window.open(src.metadata.source, '_blank');
+                                    } else {
+                                      setSourcePopupSrc(src);
+                                      setSourcePopupOpen(true);
+                                    }
+                                  }}
+                                />
+                              );
+                            }}
+                          </For>
+                        </div>
+                      </>
                     )}
                   </>
                 );
@@ -1318,6 +1344,16 @@ export const Bot = (botProps: BotProps & { class?: string }) => {
         </div>
       </div>
       {sourcePopupOpen() && <Popup isOpen={sourcePopupOpen()} value={sourcePopupSrc()} onClose={() => setSourcePopupOpen(false)} />}
+
+      {disclaimerPopupOpen() && (
+        <DisclaimerPopup
+          isOpen={disclaimerPopupOpen()}
+          onAccept={handleDisclaimerAccept}
+          title={props.disclaimer?.title}
+          message={props.disclaimer?.message}
+          buttonText={props.disclaimer?.buttonText}
+        />
+      )}
     </>
   );
 };
