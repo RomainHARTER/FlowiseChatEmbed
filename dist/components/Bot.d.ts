@@ -63,6 +63,7 @@ export type MessageType = {
     action?: IAction | null;
     rating?: FeedbackRatingType;
     id?: string;
+    followUpPrompts?: string;
     dateTime?: string;
 };
 type observerConfigType = (accessor: string | boolean | object | MessageType[]) => void;
@@ -91,11 +92,14 @@ export type BotProps = {
     footer?: FooterTheme;
     sourceDocsTitle?: string;
     observersConfig?: observersConfigType;
-    starterPrompts?: string[];
+    starterPrompts?: string[] | Record<string, {
+        prompt: string;
+    }>;
     starterPromptFontSize?: number;
     clearChatOnReload?: boolean;
     disclaimer?: DisclaimerPopUpTheme;
     dateTimeToggle?: DateTimeToggleTheme;
+    renderHTML?: boolean;
 };
 export type LeadsConfig = {
     status: boolean;
